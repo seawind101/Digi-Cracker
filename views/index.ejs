@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Digipog Transfer</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            --ink: #eef4ed;
+            --muted: #9eaea1;
+            --panel: #17211c;
+            --line: #2d4033;
+            --accent: #b9e769;
+            --accent-ink: #17210e;
+            --background: #0d1210;
+        }
+
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background: radial-gradient(circle at 85% 10%, #263b2c 0, var(--background) 42%), var(--background);
+            color: var(--ink);
+            font: 16px/1.5 Georgia, 'Times New Roman', serif;
+        }
+
+        main { width: min(980px, calc(100% - 40px)); margin: 0 auto; padding: 72px 0; }
+        header { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 42px; }
+        .eyebrow { color: var(--accent); font: 700 12px/1.2 'Trebuchet MS', sans-serif; letter-spacing: 2px; text-transform: uppercase; }
+        h1 { max-width: 620px; margin: 10px 0 0; font-size: clamp(42px, 7vw, 76px); line-height: .95; font-weight: 400; letter-spacing: -1px; }
+        .status { border: 1px solid var(--line); padding: 12px 16px; color: var(--muted); font: 13px 'Trebuchet MS', sans-serif; white-space: nowrap; }
+        .status::before { content: ''; display: inline-block; width: 8px; height: 8px; margin-right: 9px; border-radius: 50%; background: var(--accent); }
+        .status.running::before { animation: pulse 1s infinite; }
+        .controls { display: flex; align-items: center; gap: 12px; margin-top: 24px; }
+        button { border: 1px solid var(--accent); padding: 10px 14px; background: var(--accent); color: var(--accent-ink); cursor: pointer; font: 700 13px 'Trebuchet MS', sans-serif; }
+        button.secondary { border-color: var(--line); background: transparent; color: var(--ink); }
+        button:disabled { cursor: not-allowed; opacity: .45; }
+        .counter { color: var(--muted); font: 13px 'Trebuchet MS', sans-serif; }
+        .grid { display: grid; grid-template-columns: 1.35fr .65fr; gap: 18px; }
+        section { border: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 92%, transparent); padding: 28px; }
+        h2 { margin: 0 0 22px; font: 700 13px 'Trebuchet MS', sans-serif; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted); }
+        dl { display: grid; grid-template-columns: 1fr 1.5fr; gap: 14px 20px; margin: 0; }
+        dt { color: var(--muted); }
+        dd { margin: 0; overflow-wrap: anywhere; font-family: 'Courier New', monospace; }
+        pre { margin: 0; overflow-x: auto; color: var(--accent); font: 14px/1.7 'Courier New', monospace; }
+        footer { margin-top: 22px; color: var(--muted); font: 13px 'Trebuchet MS', sans-serif; }
+        @media (max-width: 700px) {
+            main { padding: 42px 0; }
+            header { display: block; }
+            .status { display: inline-block; margin-top: 24px; }
+            .grid { grid-template-columns: 1fr; }
+            section { padding: 22px; }
+        }
+    </style>
+</head>
+<body>
+    <main>
+        <header>
+            <div>
+                <div class="eyebrow">HATRED / Digipog utility</div>
+                <h1>Transfer control, ready at launch.</h1>
+            </div>
+            <div class="status" id="transfer-status">Connecting for transfer...</div>
+        </header>
+
+        <div class="grid">
+            <section>
+                <h2>Startup payload</h2>
+                <pre><%= JSON.stringify(config.STARTUP_TRANSFER_PAYLOAD, null, 2) %></pre>
+                <div class="controls">
+                    <button id="start-mock" type="button">Start mock</button>
+                    <button id="stop-mock" class="secondary" type="button" disabled>Stop</button>
+                    <span class="counter">Simulated transfers: <strong id="mock-count">0</strong></span>
+                </div>
+            </section>
+            <section>
+                <h2>Connection</h2>
+                <dl>
+                    <dt>Formbar</dt>
+                    <dd><%= config.FORMBAR_ADDRESS %></dd>
+                    <dt>Socket event</dt>
+                    <dd>transferDigipogs</dd>
+                    <dt>Response event</dt>
+                    <dd>transferResponse</dd>
+                    <dt>Public key</dt>
+                    <dd><%= config.HAS_PUBLIC_KEY ? 'Loaded' : 'Not configured' %></dd>
+                </dl>
+            </section>
+        </div>
+        <footer>The mock timer sends the configured transfer ten times per second, searching PINs from 000000 to 999999. Edit <strong>STARTUP_TRANSFER_PAYLOAD</strong> in app.js to change the payload.</footer>
+    </main>
+    <script>
+        const transferStatus = document.getElementById('transfer-status');
+        fetch('/transfer-on-load')
+            .then((response) => response.json().then((result) => ({ response, result })))
+            .then(({ response, result }) => {
+                transferStatus.textContent = response.ok && result.ok ? 'Transfer complete' : 'Transfer rejected';
+            })
+            .catch(() => {
+                transferStatus.textContent = 'Connection failed';
+            });
+
+        const startMock = document.getElementById('start-mock');
+        const stopMock = document.getElementById('stop-mock');
+        const mockCount = document.getElementById('mock-count');
+        let mockTimer;
+        let count = 0;
+
+        function stopMockTransfers() {
+            clearInterval(mockTimer);
+            mockTimer = undefined;
+            startMock.disabled = false;
+            stopMock.disabled = true;
+            transferStatus.classList.remove('running');
+            transferStatus.textContent = 'Mock stopped';
+        }
+
+        async function simulateTransfer() {
+            try {
+                const response = await fetch('/transfer-on-load');
+                const result = await response.json();
+                if (!response.ok || !result.ok) {
+                    throw new Error(result.error || 'Transfer rejected');
+                }
+
+                count += 1;
+                mockCount.textContent = count;
+                transferStatus.textContent = `Mock transfer ${count} complete`;
+            } catch (error) {
+                transferStatus.textContent = `Mock transfer failed: ${error.message}`;
+            }
+        }
+
+        startMock.addEventListener('click', () => {
+            if (mockTimer) return;
+            simulateTransfer();
+            mockTimer = setInterval(simulateTransfer, 1000);
+            startMock.disabled = true;
+            stopMock.disabled = false;
+            transferStatus.classList.add('running');
+            transferStatus.textContent = 'Mock running: 1 transfer / second';
+        });
+
+        stopMock.addEventListener('click', stopMockTransfers);
+    </script>
+</body>
+</html>
+
+
